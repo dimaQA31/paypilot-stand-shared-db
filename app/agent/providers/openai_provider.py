@@ -41,6 +41,7 @@ class OpenAIProvider(Provider):
     api_url = API_URL
     key_setting = "OPENAI_API_KEY"
     default_model = DEFAULT_MODEL
+    timeout = 60
 
     def __init__(self):
         self.api_key = getattr(config, self.key_setting)
@@ -61,7 +62,7 @@ class OpenAIProvider(Provider):
             payload["tools"] = [{"type": "function", "function": {
                 "name": t["name"], "description": t["description"],
                 "parameters": t["input_schema"]}} for t in tools]
-        resp = httpx.post(self.api_url, json=payload, timeout=60,
+        resp = httpx.post(self.api_url, json=payload, timeout=self.timeout,
                           headers=self._headers())
         resp.raise_for_status()
         data = resp.json()
