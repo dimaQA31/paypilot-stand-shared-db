@@ -1096,3 +1096,89 @@ def test_ui_asks_for_the_series_explanation_from_the_button_handler_only():
         "function seriesVerdict", 1)[0]
     assert "/api/_test/series/explain" in why_body
     assert "innerHTML" not in why_body
+
+
+def _series_probe(monkeypatch, parallel, runs=4):
+    import threading
+    import time
+
+    from app import config, main
+
+    original = main._fresh_run
+    state = {"active": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def probed(message, customer_id):
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.05)
+        try:
+            return original(message, customer_id)
+        finally:
+            with lock:
+                state["active"] -= 1
+
+    monkeypatch.setattr(config, "SERIES_PARALLEL", parallel)
+    monkeypatch.setattr(main, "_fresh_run", probed)
+    d = _series_on("lesson-04", "What is my balance?", runs=runs)
+    return d, state["peak"]
+
+
+def test_series_runs_one_at_a_time_by_default(monkeypatch):
+    d, peak = _series_probe(monkeypatch, 1)
+    assert peak == 1
+    assert len(d["arms"]["current"]["runs"]) == 4
+
+
+def test_series_runs_in_parallel_and_keeps_each_arm_on_its_own_profile(monkeypatch):
+    d, peak = _series_probe(monkeypatch, 3)
+    assert peak == 3
+    baseline, variant = d["arms"]["profile"], d["arms"]["current"]
+    assert len(baseline["runs"]) == len(variant["runs"]) == 4
+    assert {r["profile"] for r in baseline["runs"]} == {"clean"}
+    assert {r["profile"] for r in variant["runs"]} == {"lesson-04"}
+    assert len({r["request_id"] for r in baseline["runs"] + variant["runs"]}) == 8
+
+
+def test_series_parallel_setting_is_a_positive_integer(monkeypatch):
+    from app import config
+
+    monkeypatch.delenv("SERIES_PARALLEL", raising=False)
+    assert config._positive_int("SERIES_PARALLEL", 1) == 1
+    monkeypatch.setenv("SERIES_PARALLEL", "0")
+    assert config._positive_int("SERIES_PARALLEL", 1) == 1
+    monkeypatch.setenv("SERIES_PARALLEL", "4")
+    assert config._positive_int("SERIES_PARALLEL", 1) == 4
+    monkeypatch.setenv("SERIES_PARALLEL", "many")
+    with pytest.raises(RuntimeError, match="SERIES_PARALLEL"):
+        config._positive_int("SERIES_PARALLEL", 1)
+
+
+def test_series_parallel_runs_see_the_db_key_and_customer_of_their_request(monkeypatch, tmp_path):
+    import threading
+
+    from app import budget, config, db, main, session_ctx
+
+    seen = []
+
+    def fake_run(message, customer_id):
+        seen.append({"thread": threading.get_ident(), "db": db.path(),
+                     "key": budget._active.get(), "customer": session_ctx.current()})
+        return {"profile": "clean", "active_defects": [], "prompt_version": "v",
+                "tools_called": [], "elapsed_ms": 1,
+                "usage": {"input_tokens": 1, "output_tokens": 1, "cost_usd": None}}
+
+    monkeypatch.setattr(config, "SERIES_PARALLEL", 3)
+    monkeypatch.setattr(main, "_fresh_run", fake_run)
+    token = budget._active.set("key-7")
+    try:
+        with db.bound(tmp_path / "ws.db"), session_ctx.bind("CUS-0003"):
+            arm = main._series_arm("x", 5, None)
+    finally:
+        budget._active.reset(token)
+    assert len(arm["runs"]) == 5
+    assert {r["db"] for r in seen} == {tmp_path / "ws.db"}
+    assert {r["key"] for r in seen} == {"key-7"}
+    assert {r["customer"] for r in seen} == {"CUS-0003"}
+    assert threading.get_ident() not in {r["thread"] for r in seen}
