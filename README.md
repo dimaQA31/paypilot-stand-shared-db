@@ -10,6 +10,65 @@ AI-агент підтримки необанку **Verta**: перевіряє 
 
 ---
 
+
+## Project Description
+
+This repository contains the Quality Bar Proposal and evaluation results for the PayPilot AI banking assistant at the Seed stage under the **Ship it** mandate.
+
+The evaluation compares the baseline (`clean`) with the defect-injected profile (`lesson-02`) using DeepEval and domain-specific checks.
+
+## Evaluation Configuration
+
+- **Evaluation script:** `l02_eval.py`
+- **Framework:** DeepEval
+- **Baseline profile:** `clean`
+- **Test profile:** `lesson-02`
+- **Test cases:** 13
+- **Clock override:** `2026-09-15T10:00:00Z`
+
+## How to Reproduce the Evaluation
+
+Set the test clock:
+
+```bash
+export CLOCK_OVERRIDE=2026-09-15T10:00:00Z
+```
+
+Check the evaluation plan without making LLM calls:
+
+```bash
+docker compose run --rm eval --dry-run
+```
+
+Run the clean baseline with two repetitions:
+
+```bash
+docker compose run --rm eval --profiles clean --baseline-runs 2
+```
+
+Run the lesson-02 evaluation with three repetitions and clean comparison:
+
+```bash
+docker compose run --rm eval --runs 3 --baseline-runs 2
+```
+
+The evaluation measures:
+
+- Faithfulness
+- Answer Relevancy
+- Hallucination Rate (C-03, C-04, C-08)
+- Domain Correctness
+
+## Results
+
+Evaluation results are stored in the `reports/` directory.
+
+The main conclusions and proposed quality thresholds are documented in `quality-bar-proposal.md`.
+
+## Security
+
+API keys and environment variables are stored in `.env` and must not be committed to the repository.
+
 ## Швидкий старт
 
 > **Піднімаєте вперше — відкрийте [docs/setup.md](docs/setup.md).** Там те
